@@ -1,3 +1,5 @@
+var request = require('request');
+
 var serialport = require('serialport');
 var SerialPort = serialport.SerialPort;
 var arduinoSP = new SerialPort('/dev/ttyACM0', { baudrate: 9600, parser: serialport.parsers.readline('\n') });
@@ -10,12 +12,6 @@ arduinoSP.on('open', function(){
 });
 
 
-var request = require('request');
-var GoogleSpreadsheet = require("google-spreadsheet");
-
-
-var spreadsheetID = '17lSMnVHGD64vojCrmDqTtGCV4Umb_I10jkmhXt-uy64';
-var spreadsheetURL = 'https://docs.google.com/forms/d/1_6dKdTor6OT_biNwnyq-i4bbwu0bjMX35EE51TMoaJc/formResponse';
 
 var currentConfigCheckInterval = 60000; //60 seconds
 var currentUploadStateInterval = 60000; //60 seconds
@@ -25,23 +21,10 @@ var configCheckInProgress = false;
 var uploadStateInProgress = false;
 
 var currentRunlevel = 1;
-var powerRelay1Configuration = '';
-var powerRelay2Configuration = '';
+var waterValveConfiguration = '';
 
-var powerRelay1_value = '';
-var powerRelay2_value = '';
-var temperature1_value = '';
-var temperature2_value = '';
-var photoResistor1_value = '';
-var photoResistor2_value = '';
-var photoResistor3_value = '';
-var photoResistor4_value = '';
-var photoResistor5_value = '';
-var photoResistor6_value = '';
-var photoResistor7_value = '';
-var photoResistor8_value = '';
-var photoResistor9_value = '';
-var photoResistor10_value = '';
+var waterValve_value = '';
+var waterLevel_value = '';
 
 var sensorData = {};
 
@@ -171,13 +154,8 @@ function loadCurrentConfiguration(){
 }
 
 
-function changePowerRelayValue(powerRelayID){	
-	//PR0:1,PR1:1
-	if(powerRelayID == 1){
-		arduinoSP.write('PR0:' + powerRelay1_value + ',');
-	}else if(powerRelayID == 2){
-		arduinoSP.write('PR1:' + powerRelay2_value);
-	}
+function sendWaterValveCommand(){
+	arduinoSP.write('WV:' + waterValve_value);
 }
 
 
@@ -209,53 +187,17 @@ function parseSensorData(data){
 		currentSensorName = allSensorReadings[i].split(':')[0];
 		currentSensorValue = allSensorReadings[i].split(':')[1];
 
-		if(currentSensorName == 'LS0'){
-			photoResistor1_value = currentSensorValue;
-		}else if(currentSensorName == 'LS1'){
-                        photoResistor2_value = currentSensorValue;
-		}else if(currentSensorName == 'LS2'){
-                        photoResistor3_value = currentSensorValue;
-                }else if(currentSensorName == 'LS3'){
-                        photoResistor4_value = currentSensorValue;
-                }else if(currentSensorName == 'LS4'){
-                        photoResistor5_value = currentSensorValue;
-                }else if(currentSensorName == 'LS5'){
-                        photoResistor6_value = currentSensorValue;
-                }else if(currentSensorName == 'LS6'){
-                        photoResistor7_value = currentSensorValue;
-                }else if(currentSensorName == 'LS7'){
-                        photoResistor8_value = currentSensorValue;
-                }else if(currentSensorName == 'LS8'){
-                        photoResistor9_value = currentSensorValue;
-                }else if(currentSensorName == 'LS9'){
-                        photoResistor10_value = currentSensorValue;
-                }else if(currentSensorName == 'TS0'){
-			temperature1_value = currentSensorValue;
-                }else if(currentSensorName == 'TS1'){
-			temperature2_value = currentSensorValue;
-                }else if(currentSensorName == 'PR0'){
-			powerRelay1_value = currentSensorValue;
-                }else if(currentSensorName == 'PR1'){
-                        powerRelay2_value = currentSensorValue;
+		if(currentSensorName == 'WL'){
+			waterLevel_value = currentSensorValue;
+		}else if(currentSensorName == 'WV'){
+                        waterValve_value = currentSensorValue;
 		}
 	}
 
 	sensorData = {
 		"entry.1924132895" : currentRunlevel,
-		"entry.1148502686" : powerRelay1_value,
-		"entry.1850644625" : powerRelay2_value,
-		"entry.1826908576" : photoResistor1_value,
-		"entry.565892117" : photoResistor2_value,
-		"entry.1190893287" : photoResistor3_value, 
-		"entry.691124397" : photoResistor4_value,
-		"entry.1645202544" : photoResistor5_value,
-		"entry.1894015399" : photoResistor6_value,
-		"entry.32441842" : photoResistor7_value,
-		"entry.1325239727" : photoResistor8_value,
-		"entry.1650834472" : photoResistor9_value,
-		"entry.1425764903" : photoResistor10_value,
-		"entry.228287179" : temperature1_value,
-		"entry.1963374879" : temperature2_value
+		"entry.1148502686" : waterValve_value,
+		"entry.1826908576" : waterLevel_value
 	};
 
 	return sensorData;
