@@ -1,32 +1,33 @@
+var config = require('./config.json');
+
+var usonic = require('r-pi-usonic');
+var ultraSonicSensor = null;
+
+var gpio = require('rpi-gpio');
+var waterValveIsClosed = true;
 
 var wundernode = require("wundernode");
-var weatherUnderground_apiKey = '0b59be6574b302ec';
-var weatherUnderground_client = new wundernode(weatherUnderground_apiKey, false,  10, 'minute');
+var weatherUnderground_client = new wundernode(config.weatherUnderground_APIKey, false,  10, 'minute');
 
 var modedevice = require('mode-device');
-var raspberryPi_deviceID = 661;
-var modedevice_APIKey = 'v1.ZHw2NjF8MA==.1458579897.2ca32952b395548d8046fb3c82adfc7a439d3d3dfa6d89ab90ad1473';
-var modedevice_client = new modedevice(raspberryPi_deviceID, modedevice_APIKey);
+var modedevice_client = new modedevice(config.modedevice_deviceID, config.modedevice_APIKey);
 modedevice_client.commandCallback = function(msg, flags){ processCommand(msg, flags); }
 modedevice_client.listenCommands();
 
 
 //Run the main logic every minute
-var currentMainFunctionInterval = 60000;  //1 minute
 var mainFunctionIntervalObject = null;
 var mainFunctionInProgress = false;
 
 //Run the watering cycle (check weather, determine water need, release water) every 8 hours
-var currentWateringCycleInterval = 28800000; //8 hours
 var wateringCycleIntervalObject = null;
 var wateringCycleInProgress = false;
 
 //Used to measure exactly how long the water should be released for (currently 1 minute)
-var waterReleaseInterval = 60000;  //1 minute
 var waterReleaseIntervalObject = null;
 var waterReleaseInProgress = false;
 
-var deploymentZIPCode = '33704';
+var deploymentZIPCode = config.defaultDeploymentZIPCode;
 var waterValve_value = 0;
 var waterLevel_value = 0;
 var waterLevel_beforeWateringCycle = 0;
@@ -52,8 +53,18 @@ initialize();
 
 //Setup initial state and start timers
 function initialize(){
-	mainFunctionIntervalObject = setInterval(runMainFunctions, currentMainFunctionInterval);
-	wateringCycleIntervalObject = setInterval(conductWateringCycle, currentWateringCycleInterval);
+	mainFunctionIntervalObject = setInterval(runMainFunctions, config.mainFunctionInterval);
+	wateringCycleIntervalObject = setInterval(conductWateringCycle, config.wateringCycleInterval);
+
+	usonic.init(function(error){
+		if(error){
+			console.log('Error loading the water level sensor. Details: ' + error);
+		}else{
+			ultraSonicSensor = usonic.createSensor(config.ultraSonicSensor_echoGPIO, config.ultraSonicSensor_triggerGPIO, 1000);
+		}
+	});
+
+	gpio.setup(config.waterValve_controlPin, gpio.DIR_OUT);
 }
 
 //Stop timers
@@ -72,11 +83,11 @@ function runMainFunctions(){
   
 	waterLevel_value = getWaterLevel();
 	if(waterLevel_value <= LOW_WATER_THRESHOLD_LEVEL){
-		modedevice_client.triggerEvent('LOW_WATER_WARNING', {'water_level': waterLevel_value});
+		sendEvent('LOW_WATER_WARNING', {'water_level': waterLevel_value});
 	}
 	
 	if(waterLevel_value <= (waterLevel_afterLastWateringCycle - WATER_LEAKAGE_THRESHOLD)){
-		modedevice_client.triggerEvent('WATER_LEAK_WARNING', {'waterLevel_current': waterLevel_value, 'waterLevel_afterLastWaterigCycle': waterLevel_afterLastWateringCycle});
+		sendEvent('WATER_LEAK_WARNING', {'waterLevel_current': waterLevel_value, 'waterLevel_afterLastWaterigCycle': waterLevel_afterLastWateringCycle});
 	}
   
 	mainFunctionInProgress = false;
@@ -147,7 +158,7 @@ function releaseWater(){
 	sendEvent('WaterReleaseBeginning', {'waterLevel_beforeWateringCycle' : waterLevel_beforeWateringCycle});
 		
 	//Set a timer to close the water valve
-	waterReleaseIntervalObject = setInterval(stopReleasingWater, waterReleaseInterval);  
+	waterReleaseIntervalObject = setInterval(stopReleasingWater, config.waterReleaseInterval);  
 	
 	//Open the water valve
 	setWaterValve(1);
@@ -162,8 +173,7 @@ function stopReleasingWater(){
 	setWaterValve(0);
 	
 	//Make sure the water valve is closed
-	var waterValve_valueCheck = getWaterValve();
-	if(waterValve_valueCheck != 0){
+	if(!waterValveIsClosed){
 		//Alert everyone that the water valve is stuck open
 		sendEvent('WATER_VALVE_STUCK_OPEN', {'waterValve_valueCheck': waterValve_valueCheck});
 		return;
@@ -192,21 +202,25 @@ function setZIPCode(newDeploymentZIPCode){
 	deploymentZIPCode = newDeploymentZIPCode;
 }
 
-function getWaterValve(){
-	return 0;
-}
-
 function setWaterValve(newWaterValve_value){	
-	if(newWaterValve_value == 1){
-		sendEvent('WaterValveOpened', {'time': (new Date()).toString()});
-	  
-	}else{
-		sendEvent('WaterValveClosed', {'time': (new Date()).toString()});	  
-	}  
+	gpio.write(config.waterValve_controlPin, newWaterValve_value, function(error){
+		if(error){
+			console.log('Failed to change the water valve state. Details: ' + error);
+			return;
+		}
+
+		waterValveIsClosed = (newWaterValve_value == 0);
+		waterValve_value = newWaterValve_value;
+		if(newWaterValve_value == 1){
+			sendEvent('WaterValveOpened', {'time': (new Date()).toString()});	  
+		}else{
+			sendEvent('WaterValveClosed', {'time': (new Date()).toString()});	  
+		}  
+	});
 }
 
 function getWaterLevel(){
-	return 0;
+	return (ultraSonicSensor()).toFixed(2);
 }
 
 
@@ -221,10 +235,10 @@ function processCommand(msg, flags){
 		setZIPCode(newDeploymentZIPCode);
 		sendEvent('ZIPCodeChanged', {'newDeploymentZIPCode': newDeploymentZIPCode});
 	}else if(currentCommand == 'setWaterValve'){
-	  
+		var newWaterValve_value = msg['parameters']['waterValve_value'];
+		setWaterValve(newWaterValve_value);	
 	}else if(currentCommand == 'getWaterValve'){
-		waterValve_value = getWaterValve();
-		sendEvent('WaterValveChecked', {'currentValue': waterValve_value});
+		sendEvent('WaterValveChecked', {'isClosed': waterValveIsClosed});
 	}else if(currentCommand == 'getWaterLevel'){
 		waterLevel_value = getWaterLevel();
 		sendEvent('WaterLevelChecked', {'currentValue': waterLevel_value});
