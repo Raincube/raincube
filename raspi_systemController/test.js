@@ -1,3 +1,4 @@
+/**
 var usonic = require('r-pi-usonic');
 var distance = 0;
 usonic.init(function(error){
@@ -13,17 +14,38 @@ usonic.init(function(error){
 	}
 });
 
+*/
 
 
 
 
 
 var gpio = require("rpi-gpio");
-var triggerPin = 11;
-var echoPin = 13;
+gpio.setup(13, gpio.DIR_OUT, runTest);
+var currentPinValue = 0;
 
-var pulseStart = null;
-var pulseEnd = null;
+setInterval(runTest, 5000);
+
+function runTest(){
+	currentPinValue = (currentPinValue == 1) ? 0 : 1;
+
+	gpio.write(13, currentPinValue, function(error){
+		if(error){
+			console.log('Error : ' + error);
+		}else{
+			console.log('Sending signal');
+		}
+	});
+}
+
+
+
+
+//var triggerPin = 11;
+//var echoPin = 13;
+
+//var pulseStart = null;
+//var pulseEnd = null;
 
 //gpio.on('change', handlePinChange);
 
