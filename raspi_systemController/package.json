@@ -1,0 +1,17 @@
+{
+  "name": "raincube",
+  "version": "1.0.0",
+  "description": "Raspberry Pi controller code for a Raincube",
+  "main": "raincube_controller.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "mode-device": "^1.1.0",
+    "r-pi-usonic": "^2.5.0",
+    "rpi-gpio": "^0.7.0",
+    "wundernode": "^0.4.0"
+  }
+}

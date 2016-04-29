@@ -1,32 +1,32 @@
+var config = require('./config.json');
+
+var usonic = require('r-pi-usonic');
+var ultraSonicSensor = null;
+
+var gpio = require('rpi-gpio');
+var waterValveIsClosed = true;
 
 var wundernode = require("wundernode");
-var weatherUnderground_apiKey = '0b59be6574b302ec';
-var weatherUnderground_client = new wundernode(weatherUnderground_apiKey, false,  10, 'minute');
-
+var weatherUnderground_client = new wundernode(config.weatherUnderground_APIKey, true,  10, 'minute');
 var modedevice = require('mode-device');
-var raspberryPi_deviceID = 661;
-var modedevice_APIKey = 'v1.ZHw2NjF8MA==.1458579897.2ca32952b395548d8046fb3c82adfc7a439d3d3dfa6d89ab90ad1473';
-var modedevice_client = new modedevice(raspberryPi_deviceID, modedevice_APIKey);
+var modedevice_client = new modedevice(config.modedevice_deviceID, config.modedevice_APIKey);
 modedevice_client.commandCallback = function(msg, flags){ processCommand(msg, flags); }
 modedevice_client.listenCommands();
 
 
 //Run the main logic every minute
-var currentMainFunctionInterval = 60000;  //1 minute
 var mainFunctionIntervalObject = null;
 var mainFunctionInProgress = false;
 
 //Run the watering cycle (check weather, determine water need, release water) every 8 hours
-var currentWateringCycleInterval = 28800000; //8 hours
 var wateringCycleIntervalObject = null;
 var wateringCycleInProgress = false;
 
 //Used to measure exactly how long the water should be released for (currently 1 minute)
-var waterReleaseInterval = 60000;  //1 minute
 var waterReleaseIntervalObject = null;
 var waterReleaseInProgress = false;
 
-var deploymentZIPCode = '33704';
+var deploymentZIPCode = config.defaultDeploymentZIPCode;
 var waterValve_value = 0;
 var waterLevel_value = 0;
 var waterLevel_beforeWateringCycle = 0;
@@ -36,6 +36,8 @@ var rainfallNext24Hours = 0.00;
 var lastWateringTime = null;
 var nextWateringTime = null;
 
+var WATER_LEVEL_SENSOR_DISTANCE_FROM_BOTTOM_OF_CONTAINER = 57.0;	//Water level sensor distance from the bottom of the raincube in inches
+var WATER_LEVEL_SENSOR_ERROR_CORRECTION = 16.0;  			//Water level sensor error correction in inches
 var LOW_WATER_THRESHOLD_LEVEL = 2.4;	//Warnings are sent when water levels go below 5% (2.4 inches)
 var WATER_LEAKAGE_THRESHOLD = 0.50;	//Warnings are sent when water levels drop more than 0.5 inches between water cycles
 var DAILY_WATER_THRESHOLD = 0.50;	//Inches of water the garden needs everyday
@@ -52,16 +54,27 @@ initialize();
 
 //Setup initial state and start timers
 function initialize(){
-	mainFunctionIntervalObject = setInterval(runMainFunctions, currentMainFunctionInterval);
-	wateringCycleIntervalObject = setInterval(conductWateringCycle, currentWateringCycleInterval);
-}
+	mainFunctionIntervalObject = setInterval(runMainFunctions, config.mainFunctionInterval);
+	wateringCycleIntervalObject = setInterval(conductWateringCycle, config.wateringCycleInterval);
 
+	usonic.init(function(error){
+		if(error){
+			console.log('Error loading the water level sensor. Details: ' + error);
+		}else{
+			ultraSonicSensor = usonic.createSensor(config.ultraSonicSensor_echoGPIO, config.ultraSonicSensor_triggerGPIO, 1000);
+		}
+	});
+
+	gpio.setup(config.waterValve_controlPin, gpio.DIR_OUT);
+}
 //Stop timers
-function shutdown(){
+function restartTimers(){
 	if(mainFunctionIntervalObject != null){clearInterval(mainFunctionIntervalObject);}
 	if(wateringCycleIntervalObject != null){clearInterval(wateringCycleIntervalObject);}
-}
 
+        mainFunctionIntervalObject = setInterval(runMainFunctions, config.mainFunctionInterval);
+        wateringCycleIntervalObject = setInterval(conductWateringCycle, config.wateringCycleInterval);
+}
 
 
 
@@ -72,11 +85,11 @@ function runMainFunctions(){
   
 	waterLevel_value = getWaterLevel();
 	if(waterLevel_value <= LOW_WATER_THRESHOLD_LEVEL){
-		modedevice_client.triggerEvent('LOW_WATER_WARNING', {'water_level': waterLevel_value});
+		sendEvent('LOW_WATER_WARNING', {'water_level': waterLevel_value});
 	}
 	
 	if(waterLevel_value <= (waterLevel_afterLastWateringCycle - WATER_LEAKAGE_THRESHOLD)){
-		modedevice_client.triggerEvent('WATER_LEAK_WARNING', {'waterLevel_current': waterLevel_value, 'waterLevel_afterLastWaterigCycle': waterLevel_afterLastWateringCycle});
+		sendEvent('WATER_LEAK_WARNING', {'waterLevel_current': waterLevel_value, 'waterLevel_afterLastWaterigCycle': waterLevel_afterLastWateringCycle});
 	}
   
 	mainFunctionInProgress = false;
@@ -125,7 +138,9 @@ function conductWateringCycle(){
 			
 			//Determine if it will rain later today
 			rainfallNext24Hours = parseFloat(forecast_json['forecast']['simpleforecast']['forecastday'][0]['qpf_allday']['in']);
-						
+			
+			console.log(rainfallLast24Hours);
+			console.log(rainfallNext24Hours);			
 			//Determine if we should release water
 			if(rainfallLast24Hours + WATER_RELEASED_PER_CYCLE < DAILY_WATER_THRESHOLD){
 				if(rainfallNext24Hours + WATER_RELEASED_PER_CYCLE < DAILY_WATER_THRESHOLD){
@@ -147,13 +162,13 @@ function releaseWater(){
 	sendEvent('WaterReleaseBeginning', {'waterLevel_beforeWateringCycle' : waterLevel_beforeWateringCycle});
 		
 	//Set a timer to close the water valve
-	waterReleaseIntervalObject = setInterval(stopReleasingWater, waterReleaseInterval);  
+	waterReleaseIntervalObject = setInterval(stopReleasingWater, config.waterReleaseInterval);  
 	
 	//Open the water valve
 	setWaterValve(1);
 	
 	//Set next and last watering times
-	nextWateringTime = (new Date(Date.now() + currentWateringCycleInterval)).toString();
+	nextWateringTime = (new Date(Date.now() + config.wateringCycleInterval)).toString();
 	lastWateringTime = (new Date()).toString();
 }
 
@@ -162,10 +177,9 @@ function stopReleasingWater(){
 	setWaterValve(0);
 	
 	//Make sure the water valve is closed
-	var waterValve_valueCheck = getWaterValve();
-	if(waterValve_valueCheck != 0){
+	if(!waterValveIsClosed){
 		//Alert everyone that the water valve is stuck open
-		sendEvent('WATER_VALVE_STUCK_OPEN', {'waterValve_valueCheck': waterValve_valueCheck});
+		sendEvent('WATER_VALVE_STUCK_OPEN', {'waterValveIsClosed': waterValveIsClosed});
 		return;
 	}else{
 		//Turn off the timer that stops the watering cylce
@@ -192,21 +206,32 @@ function setZIPCode(newDeploymentZIPCode){
 	deploymentZIPCode = newDeploymentZIPCode;
 }
 
-function getWaterValve(){
-	return 0;
-}
-
 function setWaterValve(newWaterValve_value){	
-	if(newWaterValve_value == 1){
-		sendEvent('WaterValveOpened', {'time': (new Date()).toString()});
-	  
-	}else{
-		sendEvent('WaterValveClosed', {'time': (new Date()).toString()});	  
-	}  
+	gpio.write(config.waterValve_controlPin, newWaterValve_value, function(error){
+		if(error){
+			console.log('Failed to change the water valve state. Details: ' + error);
+			return;
+		}
+
+		waterValveIsClosed = (newWaterValve_value == 0);
+		waterValve_value = newWaterValve_value;
+		if(newWaterValve_value == 1){
+			sendEvent('WaterValveOpened', {'time': (new Date()).toString()});	  
+		}else{
+			sendEvent('WaterValveClosed', {'time': (new Date()).toString()});	  
+		}  
+	});
 }
 
 function getWaterLevel(){
-	return 0;
+	var tempWaterLevelReadingInCentimeters = (ultraSonicSensor()).toFixed(2);
+	var tempWaterLevelReadingInInches = tempWaterLevelReadingInCentimeters / 2.5;
+
+	var actualWaterLevelReadingInInches = (WATER_LEVEL_SENSOR_DISTANCE_FROM_BOTTOM_OF_CONTAINER - (tempWaterLevelReadingInInches + WATER_LEVEL_SENSOR_ERROR_CORRECTION)).toFixed(2);
+
+	sendEvent('WaterLevelChecked', {'currentValue': actualWaterLevelReadingInInches});
+
+	return actualWaterLevelReadingInInches;
 }
 
 
@@ -221,15 +246,24 @@ function processCommand(msg, flags){
 		setZIPCode(newDeploymentZIPCode);
 		sendEvent('ZIPCodeChanged', {'newDeploymentZIPCode': newDeploymentZIPCode});
 	}else if(currentCommand == 'setWaterValve'){
-	  
+		var newWaterValve_value = msg['parameters']['waterValve_value'];
+		setWaterValve(newWaterValve_value);	
 	}else if(currentCommand == 'getWaterValve'){
-		waterValve_value = getWaterValve();
-		sendEvent('WaterValveChecked', {'currentValue': waterValve_value});
+		sendEvent('WaterValveChecked', {'isClosed': waterValveIsClosed});
 	}else if(currentCommand == 'getWaterLevel'){
 		waterLevel_value = getWaterLevel();
 		sendEvent('WaterLevelChecked', {'currentValue': waterLevel_value});
 	}else if(currentCommand == 'getSystemStatus'){
-	
+
+	}else if(currentCommand == 'changeWateringCycleInterval'){
+		var newWateringCycleInterval = msg['parameters']['wateringCycleInterval'];
+		config.wateringCycleInterval = newWateringCycleInterval;
+		restartTimers();	
+		sendEvent('WateringCycleIntervalChanged',{'wateringCycleInterval':config.wateringCycleInterval});
+	}else if(currentCommand == 'changeWaterReleaseInterval'){
+		var newWaterReleaseInterval = msg['parameters']['waterReleaseInterval'];
+		config.waterReleaseInterval = newWaterReleaseInterval;
+		sendEvent('WaterReleaseIntervalChanged', {'waterReleaseInterval':config.waterReleaseInterval});
 	}else if(currentCommand == 'getLastWateringTime'){
 		sendEvent('LastWateringTimeRetrieved', {'lastWateringTime': lastWateringTime});
 	}else if(currentCommand == 'getNextWateringTime'){
@@ -247,5 +281,6 @@ function processCommand(msg, flags){
 
 
 function sendEvent(eventName, eventProperties){
-	modedevice_client.triggerEvent(eventName, eventProperties); 
+	modedevice_client.triggerEvent(eventName, eventProperties);
+	console.log(eventName); 
 }

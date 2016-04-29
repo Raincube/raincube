@@ -1,0 +1,12 @@
+{
+	"weatherUnderground_APIKey" : "0b59be6574b302ec",
+	"modedevice_deviceID" : 661,
+	"modedevice_APIKey" : "v1.ZHw2NjF8MA==.1458579897.2ca32952b395548d8046fb3c82adfc7a439d3d3dfa6d89ab90ad1473",
+	"ultraSonicSensor_triggerGPIO" : 18,
+	"ultraSonicSensor_echoGPIO" : 17,
+	"waterValve_controlPin" : 13,
+	"mainFunctionInterval" : 60000,
+	"wateringCycleInterval" : 28800000,
+	"waterReleaseInterval" : 60000,
+	"defaultDeploymentZIPCode" : "33704"
+}
